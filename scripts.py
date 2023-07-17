@@ -6,58 +6,79 @@ from trieste.objectives.utils import mk_observer
 from trieste.models.gpflow.builders import build_gpr
 from trieste.models.gpflow import GaussianProcessRegression
 from trieste.acquisition.rule import EfficientGlobalOptimization
+from trieste.acquisition.optimizer import generate_continuous_optimizer
 from trieste.acquisition.function import ExpectedImprovement
+from trieste.acquisition.function import expected_improvement
+from trieste.data import Dataset
 from trieste.bayesian_optimizer import BayesianOptimizer
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
+from typing import cast
 
 
 
-def run_and_plot(acquisition_fn = ExpectedImprovement()):
-	problem = Branin
-	num_steps =10
-	noise_var = 1e-6
-	num_reps=10
+class ConfigurableAcq(ExpectedImprovement):
+	def __init__(self, acq, search_space= None):
+		self._search_space = search_space
+		self._acq = acq
+	def prepare_acquisition_function(self,model, dataset):
+		tf.debugging.Assert(dataset is not None, [tf.constant([])])
+		dataset = cast(Dataset, dataset)
+		tf.debugging.assert_positive(len(dataset), message="Dataset must be populated.")
 
-	new_regrets = run_bo(acquisition_fn, problem, num_steps, noise_var, num_reps)
+		# Check feasibility against any explicit constraints in the search space.
+		if self._search_space is not None and self._search_space.has_constraints:
+			is_feasible = self._search_space.is_feasible(dataset.query_points)
+			if not tf.reduce_any(is_feasible):
+				query_points = dataset.query_points
+			else:
+				query_points = tf.boolean_mask(dataset.query_points, is_feasible)
+		else:
+			is_feasible = tf.constant([True], dtype=bool)
+			query_points = dataset.query_points
 
-	plt.figure()
-	plt.xlabel("# Optimisation Steps")
-	plt.ylabel("Regret")
-	for i in range(tf.shape(regrets)[1]):
-		plt.plot(regrets[:,i])
+		mean, _ = model.predict(query_points)
+		if not tf.reduce_any(is_feasible):
+			eta = tf.reduce_max(mean, axis=0)
+		else:
+			eta = tf.reduce_min(mean, axis=0)
+
+		return self._acq(model, eta)
 
 
-def run_bo(acquisition_fn = ExpectedImprovement(), problem = Branin, num_steps =10, noise_var = 1e-6, num_reps=10):
+def run_bo(acquisition_fn = expected_improvement, problem = Branin, num_steps =10, num_reps=1):
 
 	observer = mk_observer(problem.objective)
 	search_space = problem.search_space
 	minimum = problem.minimum
 	regrets = []
+	acquisition = ConfigurableAcq(acquisition_fn)
 
 	for i in range(num_reps):
 		print(f"Performing rep {i} of {num_reps}")
-		initial_query_points = search_space.sample(2 * search_space.dimension + 2)
+		tf.random.set_seed(i)
+		initial_query_points = search_space.sample(2 * search_space.dimension + 1)
 		initial_data = observer(initial_query_points)
 		gpflow_model = build_gpr(initial_data, search_space)
-		model = GaussianProcessRegression(gpflow_model)
+		model = GaussianProcessRegression(gpflow_model, num_kernel_samples=0)
 		acquisition_rule = EfficientGlobalOptimization(
-			acquisition_fn,
-			optimizer = generate_continous_optimizer()
+			acquisition,
+			optimizer = generate_continuous_optimizer()
 			)
-		bo = BayesianOptimizer(observer, search_space)
-		result = bo.optimize(num_steps, initial_data, model)
-		regret = np.minimum.accumulate(result.try_get_final_dataset().observations - minimum)
+		bo = BayesianOptimizer(observer, search_space, )
+		result = bo.optimize(num_steps, initial_data, model, acquisition_rule=acquisition_rule)
+		regret = np.minimum.accumulate(result.try_get_final_dataset().observations - minimum)[:,0]
 		regrets.append(regret)
 
 
-	return tf.stack(regrets,-1)
+	return tf.math.log(tf.stack(regrets,-1))
 
 
 
 
 
 if __name__ == '__main__':
-	run_bo()
+	run_bo(ConfigurableAcq(custom_acquisition_function))
 
-    
+	
