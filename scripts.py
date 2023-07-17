@@ -19,7 +19,7 @@ def run_and_plot(acquisition_fn = ExpectedImprovement()):
 	noise_var = 1e-6
 	num_reps=10
 
-	new_regrets = run_bo(acquisition_fn, problem, num_steps, noise_var, num_reps):
+	new_regrets = run_bo(acquisition_fn, problem, num_steps, noise_var, num_reps)
 
 	plt.figure()
 	plt.xlabel("# Optimisation Steps")
