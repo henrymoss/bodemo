@@ -47,7 +47,7 @@ class ConfigurableAcq(ExpectedImprovement):
 		return self._acq(model, eta)
 
 
-def run_bo(acquisition_fn = expected_improvement, problem = Branin, num_steps =10, num_reps=1):
+def run_bo(acquisition_fn = expected_improvement, problem = Branin, num_steps =10, num_reps=1, seed=1234):
 
 	observer = mk_observer(problem.objective)
 	search_space = problem.search_space
@@ -57,7 +57,7 @@ def run_bo(acquisition_fn = expected_improvement, problem = Branin, num_steps =1
 
 	for i in range(num_reps):
 		print(f"Performing rep {i} of {num_reps}")
-		tf.random.set_seed(i)
+		tf.random.set_seed(i*seed)
 		initial_query_points = search_space.sample(2 * search_space.dimension + 1)
 		initial_data = observer(initial_query_points)
 		gpflow_model = build_gpr(initial_data, search_space)
