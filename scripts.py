@@ -57,7 +57,7 @@ def run_bo(acquisition_fn = expected_improvement, problem = Branin, num_steps =1
 
 	for i in range(num_reps):
 		print(f"Performing rep {i} of {num_reps}")
-		tf.random.set_seed(i*seed)
+		tf.random.set_seed((i+1)*seed)
 		initial_query_points = search_space.sample(2 * search_space.dimension + 1)
 		initial_data = observer(initial_query_points)
 		gpflow_model = build_gpr(initial_data, search_space)
